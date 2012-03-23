@@ -1,12 +1,16 @@
 (function() {
-  var Builder, GhostFile, catenate, follow, name, object, pack, package_contents, reader, shifter, to_splices, unpack, zipthrough;
+  var Builder, Editor, GhostFile, catenate, follow, name, object, pack, package_contents, reader, shifter, to_splices, unpack, zipthrough;
 
   GhostFile = (function() {
 
     function GhostFile(text) {
-      this.lines = text.split('\n');
-      this.length = text.length;
+      this.setValue(text);
     }
+
+    GhostFile.prototype.setValue = function(text) {
+      this.lines = text.split('\n');
+      return this.length = text.length;
+    };
 
     GhostFile.prototype.splice = function(from, to, text) {
       var new_chunk, old_chunk, postfix, prefix, _ref, _ref2;
@@ -47,6 +51,19 @@
         offset += length + 1;
         line += 1;
       }
+    };
+
+    GhostFile.prototype.sync = function(changeset) {
+      var _this = this;
+      if (changeset === void 0) return false;
+      if (changeset.last_length !== this.length) return false;
+      to_splices(fresh, function(start, count, text) {
+        var from, to;
+        from = _this.ghost.posFromIndex(start);
+        to = _this.ghost.posFromIndex(start + count);
+        return _this.splice(from, to, text);
+      });
+      return true;
     };
 
     return GhostFile;
@@ -94,7 +111,7 @@
           this.last_length += change.count;
           this.flush('.');
       }
-      return this.cache[change.mode] += count;
+      return this.cache[change.mode] += change.count;
     };
 
     Builder.prototype.finalise = function() {
@@ -110,6 +127,83 @@
     };
 
     return Builder;
+
+  })();
+
+  Editor = (function() {
+
+    function Editor(element, options) {
+      var _this = this;
+      if (options == null) options = {};
+      options.onChange = function(editor, changes) {
+        var changeset, start, stop, text, trail, _results;
+        _results = [];
+        while (changes) {
+          start = _this.ghost.indexFromPos(changes.from);
+          stop = _this.ghost.indexFromPos(changes.to);
+          text = changes.text.join('\n');
+          trail = _this.ghost.length - stop;
+          changeset = {
+            data: text,
+            last_length: stop + trail,
+            next_length: start + text.length + trail,
+            changes: [
+              {
+                mode: '.',
+                count: start
+              }, {
+                mode: '-',
+                count: stop - start
+              }, {
+                mode: '+',
+                count: text.length
+              }, {
+                mode: '.',
+                count: trail
+              }
+            ]
+          };
+          _this.changeset = catenate(_this.changeset, changeset);
+          _this.ghost.splice(changes.from, changes.to, text);
+          _results.push(changes = changes.next);
+        }
+        return _results;
+      };
+      this.ghost = new GhostFile(options.value || "");
+      this.editor = CodeMirror(element, options);
+      this.changeset = null;
+    }
+
+    Editor.prototype.head = function(head) {
+      this.editor.setValue(head);
+      this.ghost.setValue(head);
+      return this.changeset = null;
+    };
+
+    Editor.prototype.pick = function() {
+      var res;
+      res = this.changeset;
+      this.changeset = null;
+      return res;
+    };
+
+    Editor.prototype.sync = function(changeset) {
+      var fresh, user,
+        _this = this;
+      fresh = follow(this.changeset, changeset);
+      user = follow(changeset, this.changeset);
+      if (user === void 0 || fresh === void 0) return false;
+      to_splices(fresh, function(start, count, text) {
+        var from, to;
+        from = _this.ghost.posFromIndex(start);
+        to = _this.ghost.posFromIndex(start + count);
+        return _this.editor.replaceRange(text, from, to);
+      });
+      this.changeset = user;
+      return true;
+    };
+
+    return Editor;
 
   })();
 
@@ -240,7 +334,7 @@
   follow = function(changeset0, changeset1) {
     var incomplete, out, read0, read1, shift0, shift1;
     if (changeset0 == null) return changeset1;
-    if (changeset1 == null) return;
+    if (changeset1 == null) return null;
     if (changeset0.last_length !== changeset1.last_length) return;
     out = new Builder;
     read0 = reader(changeset0.changes);
@@ -282,7 +376,6 @@
       return 0;
     });
     if (!incomplete) return out.finalise();
-    return null;
   };
 
   to_splices = function(changeset, callback) {
@@ -304,6 +397,7 @@
           break;
         case '+':
           callback(at, del, shift(count));
+          del = 0;
           at += count;
       }
     }
@@ -371,6 +465,7 @@
   package_contents = {
     GhostFile: GhostFile,
     Builder: Builder,
+    Editor: Editor,
     pack: pack,
     unpack: unpack,
     catenate: catenate,
@@ -379,6 +474,7 @@
   };
 
   if (typeof exports !== "undefined" && exports !== null) {
+    delete package_contents.Editor;
     for (name in package_contents) {
       object = package_contents[name];
       exports[name] = object;

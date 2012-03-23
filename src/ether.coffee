@@ -1,5 +1,8 @@
 class GhostFile
   constructor: (text) ->
+    @setValue text
+
+  setValue: (text) ->
     @lines = text.split('\n')
     @length = text.length
 
@@ -34,6 +37,15 @@ class GhostFile
         line += 1
     return undefined
 
+  sync: (changeset) ->
+    return false if changeset == undefined
+    return false if changeset.last_length != @length
+    to_splices fresh, (start, count, text) =>
+        from = @ghost.posFromIndex(start)
+        to = @ghost.posFromIndex(start+count)
+        @splice from, to, text
+    return true
+
 class Builder
   constructor: () ->
     @changes = []
@@ -61,13 +73,60 @@ class Builder
         when '-'
             @last_length += change.count
             @flush '.'
-    @cache[change.mode] += count
+    @cache[change.mode] += change.count
 
   finalise: () ->
     @flush '-'
     @flush '+'
     @flush '.'
     return {@changes, @data, @last_length, @next_length}
+
+class Editor
+  constructor: (element, options) ->
+    options ?= {}
+    options.onChange = (editor, changes) =>
+      while changes
+          start = @ghost.indexFromPos changes.from
+          stop = @ghost.indexFromPos changes.to
+          text = changes.text.join '\n'
+          trail = @ghost.length - stop
+          changeset =
+            data: text
+            last_length: stop + trail,
+            next_length: start + text.length + trail
+            changes: [
+              {mode:'.', count:start},
+              {mode:'-', count:stop-start},
+              {mode:'+', count:text.length},
+              {mode:'.', count:trail},
+            ]
+          @changeset = catenate @changeset, changeset
+          @ghost.splice changes.from, changes.to, text
+          changes = changes.next
+    @ghost = new GhostFile (options.value or "")
+    @editor = CodeMirror element, options
+    @changeset = null
+
+  head: (head) ->
+    @editor.setValue head
+    @ghost.setValue head
+    @changeset = null
+
+  pick: () ->
+    res = @changeset
+    @changeset = null
+    return res
+
+  sync: (changeset) ->
+    fresh = follow @changeset, changeset
+    user = follow changeset, @changeset
+    return false if user == undefined or fresh == undefined
+    to_splices fresh, (start, count, text) =>
+        from = @ghost.posFromIndex(start)
+        to = @ghost.posFromIndex(start+count)
+        @editor.replaceRange text, from, to
+    @changeset = user
+    return true
 
 pack = (changeset) ->
     return "$" unless changeset?
@@ -160,7 +219,7 @@ catenate = (changeset0, changeset1) ->
     
 follow = (changeset0, changeset1) ->
     return changeset1 unless changeset0?
-    return undefined unless changeset1?
+    return null unless changeset1?
     return undefined if changeset0.last_length != changeset1.last_length
     out = new Builder
     read0 = reader changeset0.changes
@@ -191,7 +250,7 @@ follow = (changeset0, changeset1) ->
             return 3
         return 0
     return out.finalise() unless incomplete
-    return null
+    return undefined
 
 to_splices = (changeset, callback) ->
     return unless changeset?
@@ -208,6 +267,7 @@ to_splices = (changeset, callback) ->
             when '-' then del += count
             when '+'
                 callback at, del, shift(count)
+                del = 0
                 at += count
     callback at, del, '' if del > 0
 
@@ -260,6 +320,7 @@ shifter = (text) ->
 package_contents = {
     GhostFile
     Builder
+    Editor
     pack
     unpack
     catenate
@@ -268,6 +329,7 @@ package_contents = {
 }
 
 if exports?
+    delete package_contents.Editor
     exports[name] = object for name, object of package_contents
 
 if jQuery?
