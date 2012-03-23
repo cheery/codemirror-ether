@@ -1,0 +1,4 @@
+== For those who contribute into the project ==
+
+The meat sits in src/ -directory. The command
+´coffee -cwo js/ src/´ compiles it.
