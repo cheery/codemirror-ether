@@ -57,10 +57,10 @@
       var _this = this;
       if (changeset === void 0) return false;
       if (changeset.last_length !== this.length) return false;
-      to_splices(fresh, function(start, count, text) {
+      to_splices(changeset, function(start, count, text) {
         var from, to;
-        from = _this.ghost.posFromIndex(start);
-        to = _this.ghost.posFromIndex(start + count);
+        from = _this.posFromIndex(start);
+        to = _this.posFromIndex(start + count);
         return _this.splice(from, to, text);
       });
       return true;
@@ -135,9 +135,12 @@
     function Editor(element, options) {
       var _this = this;
       if (options == null) options = {};
+      this.on_input = options.on_input || function(editor) {
+        return null;
+      };
+      this.active = true;
       options.onChange = function(editor, changes) {
-        var changeset, start, stop, text, trail, _results;
-        _results = [];
+        var changeset, start, stop, text, trail;
         while (changes) {
           start = _this.ghost.indexFromPos(changes.from);
           stop = _this.ghost.indexFromPos(changes.to);
@@ -165,9 +168,9 @@
           };
           _this.changeset = catenate(_this.changeset, changeset);
           _this.ghost.splice(changes.from, changes.to, text);
-          _results.push(changes = changes.next);
+          changes = changes.next;
         }
-        return _results;
+        if (_this.active) return _this.on_input(_this);
       };
       this.ghost = new GhostFile(options.value || "");
       this.editor = CodeMirror(element, options);
@@ -188,10 +191,12 @@
     };
 
     Editor.prototype.sync = function(changeset) {
-      var fresh, user,
+      var active, fresh, user,
         _this = this;
       fresh = follow(this.changeset, changeset);
       user = follow(changeset, this.changeset);
+      active = this.active;
+      this.active = false;
       if (user === void 0 || fresh === void 0) return false;
       to_splices(fresh, function(start, count, text) {
         var from, to;
@@ -199,6 +204,7 @@
         to = _this.ghost.posFromIndex(start + count);
         return _this.editor.replaceRange(text, from, to);
       });
+      this.active = active;
       this.changeset = user;
       return true;
     };
@@ -257,7 +263,7 @@
         case '-':
           count = pull();
           last_length += count;
-          push(count, '.');
+          push(count, '-');
           break;
         case '+':
           count = pull();

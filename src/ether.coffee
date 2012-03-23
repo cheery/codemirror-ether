@@ -40,9 +40,9 @@ class GhostFile
   sync: (changeset) ->
     return false if changeset == undefined
     return false if changeset.last_length != @length
-    to_splices fresh, (start, count, text) =>
-        from = @ghost.posFromIndex(start)
-        to = @ghost.posFromIndex(start+count)
+    to_splices changeset, (start, count, text) =>
+        from = @posFromIndex(start)
+        to = @posFromIndex(start+count)
         @splice from, to, text
     return true
 
@@ -84,6 +84,8 @@ class Builder
 class Editor
   constructor: (element, options) ->
     options ?= {}
+    @on_input = options.on_input or (editor) -> null
+    @active = true
     options.onChange = (editor, changes) =>
       while changes
           start = @ghost.indexFromPos changes.from
@@ -103,6 +105,7 @@ class Editor
           @changeset = catenate @changeset, changeset
           @ghost.splice changes.from, changes.to, text
           changes = changes.next
+      @on_input(@) if @active
     @ghost = new GhostFile (options.value or "")
     @editor = CodeMirror element, options
     @changeset = null
@@ -120,11 +123,14 @@ class Editor
   sync: (changeset) ->
     fresh = follow @changeset, changeset
     user = follow changeset, @changeset
+    active = @active
+    @active = false
     return false if user == undefined or fresh == undefined
     to_splices fresh, (start, count, text) =>
         from = @ghost.posFromIndex(start)
         to = @ghost.posFromIndex(start+count)
         @editor.replaceRange text, from, to
+    @active = active
     @changeset = user
     return true
 
@@ -162,7 +168,7 @@ unpack = (text) ->
             when '-'
                 count = pull()
                 last_length += count
-                push count, '.'
+                push count, '-'
             when '+'
                 count = pull()
                 next_length += count
