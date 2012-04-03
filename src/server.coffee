@@ -1,96 +1,70 @@
 express = require 'express'
 
 ether = require __dirname+'/ether'
+stub = (require __dirname+'/stub_database').stub
 
-# stub for pads.
-pads = {}
-padcounter = 1
+exports.create_stub_database = -> new stub()
 
-sessions = {}
+class Session
+  constructor: (@database, @pad_id) ->
+    {@head, @revision} = @database.get(@pad_id)
+    @cache = []
 
-get_session = (pad_id) ->
-    session = sessions[pad_id]
-    if session? then return session
-    pad = pads[pad_id]
-    unless pad? then return null
-    session = sessions[pad_id] = {
-        pad,
-        pad_id,
-        users:0,
-        head: new ether.GhostFile(pad.head),
-        revision:pad.history.length,
-        new_history:[],
-    }
+  bundle: (revision) ->
+    res = null
+    start = revision - @revision
+    for changeset in @cache[start..]
+        res = ether.catenate res, changeset
+    return res
+
+  sync: (changeset) ->
+    @head = ether.apply_to_string @head, changeset
+    @cache.push changeset
+    @database.update @pad_id, @head, ether.pack(changeset)
+
+class Server
+  constructor: (@database) ->
+    @sessions = {}
+
+  session: (pad_id, create) ->
+    session = @sessions[pad_id]
+    unless session? and create==true
+        @database.create pad_id unless @database.exist pad_id
+        session = @sessions[pad_id] = new Session(@database, pad_id)
+        session.users = 0
     return session
 
-create_new_pad = () ->
-    id = 'pad_'+(padcounter++)
-    pads[id] = {
-      head: '',
-      history: []
-    }
-    return id
+  get_head: (pad_id) -> @database.get(pad_id)?.head
 
-get_head = (id) ->
-  pad = pads[id]
-  return null if pad == undefined
-  return pad.head
-
-exports.start = (app, io, url) ->
+exports.start = (app, io, database, url) ->
   app.use url, express.static __dirname
-
+  server = new Server database
   io.of('/ether').on 'connection', (socket) ->
-    socket.on 'new', (info, response) ->
-      response create_new_pad()
     socket.on 'clone', (info, response) ->
       return response {error: 'schema violation'} unless typeof info == "object"
-      session = get_session info.pad_id
-      return response {error: 'no such pad'} if session == null
-      response start_session(socket, session)
-  
-  return {
-    create_new_pad,
-    get_head,
-    pads,
-  }
+      session = server.session info.pad_id, true
+      return response {error: 'no such pad'} unless session?
+      response start_session(server, socket, session)
+  return server
 
-# should be done every ten seconds.
-sync_session = (session) ->
-  session.pad.head = session.head.lines.join '\n'
-  session.pad.history = session.pad.history.concat session.new_history
-
-disconnect_session = (socket, session) ->
-  if --session.users <= 0
-      sync_session(session)
-
-      delete session[session.pad_id]
-
-## used only at merging previous changes.
-bundle_session = (session, revision) ->
-  res = null
-  start = revision - session.revision
-  for changeset in session.new_history[start..]
-    res = ether.catenate res, changeset
-  return res
-
-start_session = (socket, session) ->
+start_session = (server, socket, session) ->
   session.users++
   socket.join session.pad_id
-  socket.on 'disconnect', () -> disconnect_session(socket, session)
+  socket.on 'disconnect', () ->
+    delete server.sessions[session.pad_id] if --session.users <= 0
   socket.on 'data', (info) -> # do an immediate update.. for now.
     return unless typeof info == "object"
     changeset = ether.unpack info.package
-    changeset = ether.follow (bundle_session session, info.revision), changeset
+    changeset = ether.follow session.bundle(info.revision), changeset
     return unless changeset?
-    session.head.sync changeset
-    session.new_history.push changeset
+    session.sync changeset
     socket.emit 'ack', 1
     socket.broadcast.to(session.pad_id).emit 'sync', {
       package: ether.pack changeset
     }
   return {
-      head: session.head.lines.join '\n'
-      revision: session.revision + session.new_history.length
+      head: session.head
+      revision: session.revision + session.cache.length
   }
 
 #socket_io = require 'socket.io'

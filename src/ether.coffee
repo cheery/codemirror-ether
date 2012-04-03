@@ -277,6 +277,18 @@ to_splices = (changeset, callback) ->
                 at += count
     callback at, del, '' if del > 0
 
+apply_to_string = (string, changeset) ->
+    return string unless changeset?
+    shift = shifter changeset.data
+    copy = shifter string
+    out = ''
+    for {mode, count} in changeset.changes
+        switch mode
+            when '.' then out += copy(count)
+            when '-' then copy(count)
+            when '+' then out += shift(count)
+    return out
+
 reader = (sequence) ->
   index = 0
   length = sequence.length
@@ -332,6 +344,7 @@ package_contents = {
     catenate
     follow
     to_splices
+    apply_to_string
 }
 
 if exports?

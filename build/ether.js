@@ -1,5 +1,5 @@
 (function() {
-  var Builder, Editor, GhostFile, catenate, follow, name, object, pack, package_contents, reader, shifter, to_splices, unpack, zipthrough;
+  var Builder, Editor, GhostFile, apply_to_string, catenate, follow, name, object, pack, package_contents, reader, shifter, to_splices, unpack, zipthrough;
 
   GhostFile = (function() {
 
@@ -410,6 +410,29 @@
     if (del > 0) return callback(at, del, '');
   };
 
+  apply_to_string = function(string, changeset) {
+    var copy, count, mode, out, shift, _i, _len, _ref, _ref2;
+    if (changeset == null) return string;
+    shift = shifter(changeset.data);
+    copy = shifter(string);
+    out = '';
+    _ref = changeset.changes;
+    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+      _ref2 = _ref[_i], mode = _ref2.mode, count = _ref2.count;
+      switch (mode) {
+        case '.':
+          out += copy(count);
+          break;
+        case '-':
+          copy(count);
+          break;
+        case '+':
+          out += shift(count);
+      }
+    }
+    return out;
+  };
+
   reader = function(sequence) {
     var index, length;
     index = 0;
@@ -476,7 +499,8 @@
     unpack: unpack,
     catenate: catenate,
     follow: follow,
-    to_splices: to_splices
+    to_splices: to_splices,
+    apply_to_string: apply_to_string
   };
 
   if (typeof exports !== "undefined" && exports !== null) {

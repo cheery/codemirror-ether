@@ -1,56 +1,80 @@
 (function() {
-  var bundle_session, create_new_pad, disconnect_session, ether, express, get_head, get_session, padcounter, pads, sessions, start_session, sync_session;
+  var Server, Session, ether, express, start_session, stub;
 
   express = require('express');
 
   ether = require(__dirname + '/ether');
 
-  pads = {};
+  stub = (require(__dirname + '/stub_database')).stub;
 
-  padcounter = 1;
+  exports.create_stub_database = function() {
+    return new stub();
+  };
 
-  sessions = {};
+  Session = (function() {
 
-  get_session = function(pad_id) {
-    var pad, session;
-    session = sessions[pad_id];
-    if (session != null) return session;
-    pad = pads[pad_id];
-    if (pad == null) return null;
-    session = sessions[pad_id] = {
-      pad: pad,
-      pad_id: pad_id,
-      users: 0,
-      head: new ether.GhostFile(pad.head),
-      revision: pad.history.length,
-      new_history: []
+    function Session(database, pad_id) {
+      var _ref;
+      this.database = database;
+      this.pad_id = pad_id;
+      _ref = this.database.get(this.pad_id), this.head = _ref.head, this.revision = _ref.revision;
+      this.cache = [];
+    }
+
+    Session.prototype.bundle = function(revision) {
+      var changeset, res, start, _i, _len, _ref;
+      res = null;
+      start = revision - this.revision;
+      _ref = this.cache.slice(start);
+      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+        changeset = _ref[_i];
+        res = ether.catenate(res, changeset);
+      }
+      return res;
     };
-    return session;
-  };
 
-  create_new_pad = function() {
-    var id;
-    id = 'pad_' + (padcounter++);
-    pads[id] = {
-      head: '',
-      history: []
+    Session.prototype.sync = function(changeset) {
+      this.head = ether.apply_to_string(this.head, changeset);
+      this.cache.push(changeset);
+      return this.database.update(this.pad_id, this.head, ether.pack(changeset));
     };
-    return id;
-  };
 
-  get_head = function(id) {
-    var pad;
-    pad = pads[id];
-    if (pad === void 0) return null;
-    return pad.head;
-  };
+    return Session;
 
-  exports.start = function(app, io, url) {
+  })();
+
+  Server = (function() {
+
+    function Server(database) {
+      this.database = database;
+      this.sessions = {};
+    }
+
+    Server.prototype.session = function(pad_id, create) {
+      var session;
+      session = this.sessions[pad_id];
+      if (!((session != null) && create === true)) {
+        if (!this.database.exist(pad_id)) this.database.create(pad_id);
+        session = this.sessions[pad_id] = new Session(this.database, pad_id);
+        session.users = 0;
+      }
+      return session;
+    };
+
+    Server.prototype.get_head = function(pad_id) {
+      var _ref;
+      return (_ref = this.database.get(pad_id)) != null ? _ref.head : void 0;
+    };
+
+    return Server;
+
+  })();
+
+  exports.start = function(app, io, database, url) {
+    var server;
     app.use(url, express.static(__dirname));
+    server = new Server(database);
     io.of('/ether').on('connection', function(socket) {
-      socket.on('new', function(info, response) {
-        return response(create_new_pad());
-      });
       return socket.on('clone', function(info, response) {
         var session;
         if (typeof info !== "object") {
@@ -58,68 +82,39 @@
             error: 'schema violation'
           });
         }
-        session = get_session(info.pad_id);
-        if (session === null) {
+        session = server.session(info.pad_id, true);
+        if (session == null) {
           return response({
             error: 'no such pad'
           });
         }
-        return response(start_session(socket, session));
+        return response(start_session(server, socket, session));
       });
     });
-    return {
-      create_new_pad: create_new_pad,
-      get_head: get_head,
-      pads: pads
-    };
+    return server;
   };
 
-  sync_session = function(session) {
-    session.pad.head = session.head.lines.join('\n');
-    return session.pad.history = session.pad.history.concat(session.new_history);
-  };
-
-  disconnect_session = function(socket, session) {
-    if (--session.users <= 0) {
-      sync_session(session);
-      return delete session[session.pad_id];
-    }
-  };
-
-  bundle_session = function(session, revision) {
-    var changeset, res, start, _i, _len, _ref;
-    res = null;
-    start = revision - session.revision;
-    _ref = session.new_history.slice(start);
-    for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-      changeset = _ref[_i];
-      res = ether.catenate(res, changeset);
-    }
-    return res;
-  };
-
-  start_session = function(socket, session) {
+  start_session = function(server, socket, session) {
     session.users++;
     socket.join(session.pad_id);
     socket.on('disconnect', function() {
-      return disconnect_session(socket, session);
+      if (--session.users <= 0) return delete server.sessions[session.pad_id];
     });
     socket.on('data', function(info) {
       var changeset;
       if (typeof info !== "object") return;
       changeset = ether.unpack(info.package);
-      changeset = ether.follow(bundle_session(session, info.revision), changeset);
+      changeset = ether.follow(session.bundle(info.revision), changeset);
       if (changeset == null) return;
-      session.head.sync(changeset);
-      session.new_history.push(changeset);
+      session.sync(changeset);
       socket.emit('ack', 1);
       return socket.broadcast.to(session.pad_id).emit('sync', {
         package: ether.pack(changeset)
       });
     });
     return {
-      head: session.head.lines.join('\n'),
-      revision: session.revision + session.new_history.length
+      head: session.head,
+      revision: session.revision + session.cache.length
     };
   };
 
