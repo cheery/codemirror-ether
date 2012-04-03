@@ -1,4 +1,22 @@
-== For those who contribute into the project ==
+# Codemirror Ether
 
-The meat sits in src/ -directory. The command
-´coffee -cwo js/ src/´ compiles it.
+Collaborative editor written on top of codemirror, node.js and socket.io
+
+Any APIs into the module are still unstable. Author has not
+ended to conclusion about how to structure the module, yet.
+
+## Directory map
+
+- src/
+  contains most source code.
+
+- example/simple.coffee
+  an example app.
+
+- build/
+  coffee -cwo build src
+  contains the final compiled module.
+
+- css/ and js/
+  miscellaneous files related to the example,
+  including codemirror.js
