@@ -1,0 +1,19 @@
+{
+  "name": "ether",
+  "version": "0.0.0",
+  "engines": [
+    "v0.7.0-pre"
+  ],
+  "author": "Henri Tuhola <henri.tuhola@gmail.com> (http://boxbase.org/)",
+  "scripts": "compile",
+  "main": "build/server.js",
+  "directories": [],
+  "dependencies": {},
+  "devDependencies": {},
+  "description": "Etherpad reimplementation, uses mongodb and codemirror",
+  "homepage": "https://github.com/cheery/codemirror-ether",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/cheery/codemirror-ether.git"
+  }
+}
