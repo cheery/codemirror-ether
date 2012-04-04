@@ -1,4 +1,81 @@
-ether = $.ether
+core = $.ether_core
+
+class Ghost
+  constructor: (text) ->
+    @setValue text
+
+  setValue: (text) ->
+    @lines = text.split('\n')
+    @length = text.length
+
+  splice: (from, to, text) ->
+    prefix = @lines[from.line].substr(0, from.ch)
+    postfix = @lines[to.line].substr(to.ch)
+    old_chunk = @lines[from.line..to.line].join '\n'
+    new_chunk = prefix + text + postfix
+    @lines[from.line..to.line] = new_chunk.split('\n')
+    @length += new_chunk.length - old_chunk.length
+    return old_chunk
+
+  indexFromPos: (pos) ->
+    offset = 0
+    line = 0
+    while line < @lines.length
+        length = @lines[line].length
+        if line == pos.line and pos.ch <= length
+            return offset + pos.ch
+        offset += length + 1
+        line += 1
+    return undefined
+
+  posFromIndex: (index) ->
+    offset = 0
+    line = 0
+    while line < @lines.length
+        length = @lines[line].length
+        ch = index - offset
+        return {line, ch} if ch <= length
+        offset += length + 1
+        line += 1
+    return undefined
+
+class Editor
+  constructor: (element, options) ->
+    options ?= {}
+    options.onChange = (editor, changes) =>
+      while changes
+          start = @ghost.indexFromPos changes.from
+          stop = @ghost.indexFromPos changes.to
+          text = changes.text.join '\n'
+          length = @ghost.length
+          changeset = core.splice_to_changeset start, stop, text, length
+          @changeset = core.catenate @changeset, changeset
+          @ghost.splice changes.from, changes.to, text
+          changes = changes.next
+    @ghost = new Ghost (options.value or "")
+    @editor = CodeMirror element, options
+    @changeset = '$'
+
+  head: (head) ->
+    @editor.setValue head
+    @ghost.setValue head
+    @changeset = '$'
+
+  pick: () ->
+    res = @changeset
+    @changeset = '$'
+    return res
+
+  sync: (changeset) ->
+    fresh = follow @changeset, changeset
+    editor_changeset = follow changeset, @changeset
+    return false if editor_changeset == undefined or fresh == undefined
+    core.convert_to_splices fresh, (start, count, text) =>
+        from = @ghost.posFromIndex(start)
+        to = @ghost.posFromIndex(start+count)
+        @editor.replaceRange text, from, to
+    @changeset = editor_changeset
+    return true
 
 $.fn.open_ether = (pad_id) -> @each -> new_editor(@, pad_id)
 
@@ -14,18 +91,18 @@ new_editor = (element, pad_id) ->
         element.innerHTML = response.error
         return
     element.innerHTML = ''
-    editor = new ether.Editor element,
+    editor = new Editor element,
       value: response.head
       lineNumbers: true
     revision = response.revision
     waiting = []
     socket.on 'sync', (info) -> # 'walk' up the chain.
         revision++
-        changeset = ether.unpack info.package
+        changeset = info.package
         for i in [0...waiting.length]
             waiting_changeset = waiting[i]
-            waiting[i] = ether.follow changeset, waiting_changeset
-            changeset = ether.follow waiting_changeset, changeset
+            waiting[i] = core.follow changeset, waiting_changeset
+            changeset = core.follow waiting_changeset, changeset
         unless editor.sync changeset
             socket.emit 'error', 'sync failed!'
 
@@ -35,10 +112,10 @@ new_editor = (element, pad_id) ->
 
     sync = ->
         changeset = editor.pick()
-        if changeset?
+        if changeset? and changeset != '$'
             info = {
                 revision: revision
-                package: ether.pack changeset
+                package: changeset
             }
             waiting.push changeset
             socket.emit 'data', info

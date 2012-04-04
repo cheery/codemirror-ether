@@ -1,6 +1,6 @@
 express = require 'express'
 
-ether = require __dirname+'/ether'
+core = require __dirname+'/core'
 stub = (require __dirname+'/stub_database').stub
 
 exports.create_stub_database = -> new stub()
@@ -14,13 +14,16 @@ class Session
     res = null
     start = revision - @revision
     for changeset in @cache[start..]
-        res = ether.catenate res, changeset
+        res = core.catenate res, changeset
     return res
 
   sync: (changeset) ->
-    @head = ether.apply_to_string @head, changeset
+    head = core.apply_to_string @head, changeset
+    return false if head == null
+    @head = head
     @cache.push changeset
-    @database.update @pad_id, @head, ether.pack(changeset)
+    @database.update @pad_id, @head, changeset
+    return true
 
 class Server
   constructor: (@database) ->
@@ -54,13 +57,13 @@ start_session = (server, socket, session) ->
     delete server.sessions[session.pad_id] if --session.users <= 0
   socket.on 'data', (info) -> # do an immediate update.. for now.
     return unless typeof info == "object"
-    changeset = ether.unpack info.package
-    changeset = ether.follow session.bundle(info.revision), changeset
+    changeset = info.package
+    changeset = core.follow session.bundle(info.revision), changeset
     return unless changeset?
     session.sync changeset
     socket.emit 'ack', 1
     socket.broadcast.to(session.pad_id).emit 'sync', {
-      package: ether.pack changeset
+      package: changeset
     }
   return {
       head: session.head

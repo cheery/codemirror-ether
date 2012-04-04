@@ -1,9 +1,9 @@
 (function() {
-  var Server, Session, ether, express, start_session, stub;
+  var Server, Session, core, express, start_session, stub;
 
   express = require('express');
 
-  ether = require(__dirname + '/ether');
+  core = require(__dirname + '/core');
 
   stub = (require(__dirname + '/stub_database')).stub;
 
@@ -28,15 +28,19 @@
       _ref = this.cache.slice(start);
       for (_i = 0, _len = _ref.length; _i < _len; _i++) {
         changeset = _ref[_i];
-        res = ether.catenate(res, changeset);
+        res = core.catenate(res, changeset);
       }
       return res;
     };
 
     Session.prototype.sync = function(changeset) {
-      this.head = ether.apply_to_string(this.head, changeset);
+      var head;
+      head = core.apply_to_string(this.head, changeset);
+      if (head === null) return false;
+      this.head = head;
       this.cache.push(changeset);
-      return this.database.update(this.pad_id, this.head, ether.pack(changeset));
+      this.database.update(this.pad_id, this.head, changeset);
+      return true;
     };
 
     return Session;
@@ -103,13 +107,13 @@
     socket.on('data', function(info) {
       var changeset;
       if (typeof info !== "object") return;
-      changeset = ether.unpack(info.package);
-      changeset = ether.follow(session.bundle(info.revision), changeset);
+      changeset = info.package;
+      changeset = core.follow(session.bundle(info.revision), changeset);
       if (changeset == null) return;
       session.sync(changeset);
       socket.emit('ack', 1);
       return socket.broadcast.to(session.pad_id).emit('sync', {
-        package: ether.pack(changeset)
+        package: changeset
       });
     });
     return {
