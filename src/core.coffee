@@ -1,3 +1,5 @@
+exports ?= (this.Collab = {})
+
 # This code packs and unpacks the changesets.
 # It's straightforward enough that the unpack/pack are internal commands.
 pack = (changeset) ->
@@ -11,7 +13,7 @@ unpack = (text) ->
     last_length = 0
     next_length = 0
     data_length = 0
-    return null if text == '$' or typeof text != "string"
+    return undefined if typeof text != "string"
     changes = []
     buffer = ''
     pull = () ->
@@ -21,6 +23,7 @@ unpack = (text) ->
     push = (count, mode) ->
         changes.push {count, mode} if count > 0
     cut = text.indexOf '$'
+    return undefined if cut == -1
     code = text.slice(0,cut)
     data = text.slice(cut+1)
     return undefined unless data?
@@ -124,7 +127,7 @@ shifter = (text) ->
     return text.substr last_index, count
 
 # Two key operational transformations.
-catenate = (changeset0, changeset1) ->
+exports.catenate = (changeset0, changeset1) ->
     changeset0 = unpack changeset0
     changeset1 = unpack changeset1
     return pack changeset1 unless changeset0?
@@ -172,7 +175,7 @@ catenate = (changeset0, changeset1) ->
     #console.log "mega fail huh?"
     return undefined
     
-follow = (changeset0, changeset1) ->
+exports.follow = (changeset0, changeset1) ->
     changeset0 = unpack changeset0
     changeset1 = unpack changeset1
     return pack changeset1 unless changeset0?
@@ -209,19 +212,25 @@ follow = (changeset0, changeset1) ->
     return out.finalise() unless incomplete
     return undefined
 
-apply_to_string = (string, changeset) ->
+exports.apply_to_string = (string, changeset) ->
     changeset = unpack changeset
-    return string unless changeset?
+    return {head:string, undo:'$'} unless changeset?
     return null if string.length != changeset.last_length
+    undo = new Builder
     shift = shifter changeset.data
     copy = shifter string
     out = ''
     for {mode, count} in changeset.changes
         switch mode
-            when '.' then out += copy(count)
-            when '-' then copy(count)
-            when '+' then out += shift(count)
-    return out
+            when '.'
+                out += copy(count)
+                undo.push {mode:'.', count}
+            when '-'
+                undo.push {mode:'+', count}, copy(count)
+            when '+'
+                out += shift(count)
+                undo.push {mode:'-', count}
+    return {head:out, undo: undo.finalise()}
 
 class BlameBuilder
   constructor: () ->
@@ -242,7 +251,7 @@ class BlameBuilder
     @flush()
     return @blame
 
-apply_to_blame = (blame, changeset, author) ->
+exports.apply_to_blame = (blame, changeset, author) ->
     changeset = unpack changeset
     return blame unless changeset?
     out = new BlameBuilder
@@ -269,7 +278,7 @@ apply_to_blame = (blame, changeset, author) ->
             when '+' then out.push {count, author}
     return out.finalise()
 
-convert_to_splices = (changeset, callback) ->
+exports.convert_to_splices = (changeset, callback) ->
     changeset = unpack changeset
     return unless changeset?
     shift = shifter changeset.data
@@ -289,7 +298,7 @@ convert_to_splices = (changeset, callback) ->
                 at += count
     callback at, del, '' if del > 0
 
-splice_to_changeset = (start, stop, text, last_length) ->
+exports.splice_to_changeset = (start, stop, text, last_length) ->
     out = new Builder
     out.push {mode:'.', count:start}
     out.push {mode:'-', count:stop-start}
@@ -297,8 +306,15 @@ splice_to_changeset = (start, stop, text, last_length) ->
     out.push {mode:'.', count:last_length - stop}
     return out.finalise()
 
+exports.is_identity = (changeset) ->
+    changeset = unpack changeset
+    return undefined unless changeset?
+    for {mode, count} in changeset.changes
+        return false if mode != '.'
+    return true
+
 # some internals are exposed, for testing
-internals = {
+exports.internals = {
     pack
     unpack
     Builder
@@ -307,19 +323,79 @@ internals = {
     shifter
 }
 
-# finally, everything we need from this package.
-package_contents = {
-    internals
-    catenate
-    follow
-    convert_to_splices
-    apply_to_string
-    apply_to_blame
-    splice_to_changeset
-}
+if CodeMirror?
+    class Ghost
+      constructor: (text) ->
+        @setValue text
 
-if exports?
-    exports[name] = object for name, object of package_contents
+      setValue: (text) ->
+        @lines = text.split('\n')
+        @length = text.length
 
-if jQuery?
-    $.ether_core = package_contents
+      splice: (from, to, text) ->
+        prefix = @lines[from.line].substr(0, from.ch)
+        postfix = @lines[to.line].substr(to.ch)
+        old_chunk = @lines[from.line..to.line].join '\n'
+        new_chunk = prefix + text + postfix
+        @lines[from.line..to.line] = new_chunk.split('\n')
+        @length += new_chunk.length - old_chunk.length
+        return old_chunk
+
+      indexFromPos: (pos) ->
+        offset = 0
+        line = 0
+        while line < @lines.length
+            length = @lines[line].length
+            if line == pos.line and pos.ch <= length
+                return offset + pos.ch
+            offset += length + 1
+            line += 1
+        return undefined
+
+      posFromIndex: (index) ->
+        offset = 0
+        line = 0
+        while line < @lines.length
+            length = @lines[line].length
+            ch = index - offset
+            return {line, ch} if ch <= length
+            offset += length + 1
+            line += 1
+        return undefined
+
+    this.EtherMirror = (element, options) ->
+        options ?= {}
+        ghost = new Ghost (options.value or '')
+        changeset = "#{ghost.length.toString 36}.$"
+        options.onChange = (editor, changes) ->
+          while changes
+            start = ghost.indexFromPos changes.from
+            stop = ghost.indexFromPos changes.to
+            text = changes.text.join '\n'
+            length = ghost.length
+            new_changeset = Collab.splice_to_changeset start, stop, text, length
+            changeset = Collab.catenate changeset, new_changeset
+            ghost.splice changes.from, changes.to, text
+            changes = changes.next
+        codemirror = CodeMirror element, options
+        codemirror.setHead = (text) ->
+            codemirror.setValue head
+            ghost.setValue head
+            changeset = "#{ghost.length.toString 36}.$"
+        codemirror.getChanges = () ->
+            changeset
+        codemirror.popChanges = () ->
+            result = changeset
+            changeset = "#{ghost.length.toString 36}.$"
+            return result
+        codemirror.syncChanges = (new_changeset) ->
+            merger = Collab.follow changeset, new_changeset
+            merged_changes = Collab.follow new_changeset, changeset
+            return false unless merged_changes? and merger?
+            Collab.convert_to_splices merger, (start, count, text) ->
+                from = ghost.posFromIndex(start)
+                to = ghost.posFromIndex(start+count)
+                codemirror.replaceRange text, from, to
+            changeset = merged_changes
+            return true
+        return codemirror
