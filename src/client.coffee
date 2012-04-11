@@ -1,43 +1,5 @@
 core = $.ether_core
 
-class Ghost
-  constructor: (text) ->
-    @setValue text
-
-  setValue: (text) ->
-    @lines = text.split('\n')
-    @length = text.length
-
-  splice: (from, to, text) ->
-    prefix = @lines[from.line].substr(0, from.ch)
-    postfix = @lines[to.line].substr(to.ch)
-    old_chunk = @lines[from.line..to.line].join '\n'
-    new_chunk = prefix + text + postfix
-    @lines[from.line..to.line] = new_chunk.split('\n')
-    @length += new_chunk.length - old_chunk.length
-    return old_chunk
-
-  indexFromPos: (pos) ->
-    offset = 0
-    line = 0
-    while line < @lines.length
-        length = @lines[line].length
-        if line == pos.line and pos.ch <= length
-            return offset + pos.ch
-        offset += length + 1
-        line += 1
-    return undefined
-
-  posFromIndex: (index) ->
-    offset = 0
-    line = 0
-    while line < @lines.length
-        length = @lines[line].length
-        ch = index - offset
-        return {line, ch} if ch <= length
-        offset += length + 1
-        line += 1
-    return undefined
 
 class Editor
   constructor: (element, options) ->

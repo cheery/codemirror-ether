@@ -6,7 +6,7 @@
   ],
   "author": "Henri Tuhola <henri.tuhola@gmail.com> (http://boxbase.org/)",
   "scripts": "compile",
-  "main": "build/server.js",
+  "main": "lib/ether.js",
   "directories": [],
   "dependencies": {},
   "devDependencies": {},

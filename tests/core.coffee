@@ -1,4 +1,4 @@
-core = require __dirname+'/../build/core'
+core = require __dirname+'/../lib/core'
 
 test_text = "Nimble fox stole your pokefarts."
 test_blame = [{
@@ -34,10 +34,10 @@ console.log core.apply_to_blame test_blame, "a-f+d.8-e+1.$Lord Biggencuckorn col
 
 console.log core.splice_to_changeset(10, 20, "hello", 29)
 
-console.log core.catenate('$',c0)
-console.log core.catenate(c0,'$')
-console.log core.follow(c0,'$')
-console.log core.follow('$',c0)
+console.log core.catenate('b.$',c0)
+console.log core.catenate(c0,'d.$')
+console.log core.follow(c0,'b.$')
+console.log core.follow('b.$',c0)
 
 console.log core.catenate(null,c0)
 
