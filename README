@@ -10,13 +10,9 @@ ended to conclusion about how to structure the module, yet.
 - src/
   contains most source code.
 
-- example/simple.coffee
-  an example app.
+- example/
+  an example
 
-- build/
-  coffee -cwo build src
+- lib/
+  coffee -cwo lib src
   contains the final compiled module.
-
-- css/ and js/
-  miscellaneous files related to the example,
-  including codemirror.js
