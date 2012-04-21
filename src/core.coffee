@@ -1,4 +1,4 @@
-exports ?= (this.Collab = {})
+exports = exports ? (this.Collab = {})
 
 # This code packs and unpacks the changesets.
 # It's straightforward enough that the unpack/pack are internal commands.
